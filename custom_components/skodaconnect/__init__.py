@@ -63,7 +63,7 @@ SERVICE_SET_SCHEDULE_SCHEMA = vol.Schema(
 SERVICE_SET_MAX_CURRENT_SCHEMA = vol.Schema(
     {
         vol.Required("device_id"): vol.All(cv.string, vol.Length(min=32, max=32)),
-        vol.Required("current"): vol.In(["maximum", "reduced"]),
+        vol.Required("current"): vol.Any(vol.In(range(5, 33)), vol.In([ "maximum", "reduced"])),
     }
 )
 SERVICE_SET_CHARGE_LIMIT_SCHEMA = vol.Schema(
@@ -206,7 +206,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             car = await get_car(service_call)
 
             # Get charge current and execute service call
-            current = 254 if "maximum" in service_call.data.get("current", "") else 252
+            current = service_call.data.get('current', 'reduced')
+            if current == "maximum":
+                current = 254
+            elif current == "reduced":
+                current = 252
+
             if await car.set_charger_current(current):
                 _LOGGER.info(f"Service call 'set_current' returned success!")
                 await coordinator.async_request_refresh()
