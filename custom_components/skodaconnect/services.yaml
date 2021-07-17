@@ -45,6 +45,14 @@ set_charger_max_current:
           options:
             - maximum
             - reduced
+    current:
+      name: Current Amp
+      description: Maximum current for charger in A values
+      advanced: true
+      selector:
+        number:
+          min: 5
+          max: 32
 set_pheater_duration:
   name: Set parking heater runtime
   description: >
