@@ -9,7 +9,7 @@
         "@lendik007",
         "@Farfar"
     ],
-    "requirements": ["skodaconnect==1.0.42"],
+    "requirements": ["git+https://github.com/stefanuc111/skodaconnect.git#skodaconnect==main"],
     "version": "v1.0.42-rc2",
     "iot_class": "cloud_polling"
 }
