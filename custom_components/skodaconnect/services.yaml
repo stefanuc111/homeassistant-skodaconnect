@@ -37,22 +37,9 @@ set_charger_max_current:
         device:
           integration: skodaconnect
     current:
-      name: Current
-      description: Maximum current for charger
-      advanced: true
-      selector:
-        select:
-          options:
-            - maximum
-            - reduced
-    current:
       name: Current Amp
-      description: Maximum current for charger in A values
+      description: Maximum current for charger in A values or maximum/reduced
       advanced: true
-      selector:
-        number:
-          min: 5
-          max: 32
 set_pheater_duration:
   name: Set parking heater runtime
   description: >
