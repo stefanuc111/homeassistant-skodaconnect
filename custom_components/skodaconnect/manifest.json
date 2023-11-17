@@ -9,7 +9,7 @@
         "@lendik007",
         "@Farfar"
     ],
-    "requirements": ["git+https://github.com/stefanuc111/skodaconnect.git@main#skodaconnect==1.1.19", "homeassistant>=2021.12.0"],
+    "requirements": ["git+https://github.com/stefanuc111/skodaconnect.git@main#skodaconnect==1.3.8", "homeassistant>=2021.12.0"],
     "version": "v1.0.68",
     "iot_class": "cloud_polling"
 }
