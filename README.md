@@ -1,6 +1,14 @@
-![Version](https://img.shields.io/github/v/release/lendy007/homeassistant-skodaconnect?include_prereleases)
+![Version](https://img.shields.io/github/v/release/skodaconnect/homeassistant-skodaconnect?include_prereleases)
 ![PyPi](https://img.shields.io/pypi/v/skodaconnect?label=latest%20library)
-![Downloads](https://img.shields.io/github/downloads/lendy007/homeassistant-skodaconnect/total)
+![Downloads](https://img.shields.io/github/downloads/skodaconnect/homeassistant-skodaconnect/total)
+
+# **Contributors needed**
+Keeping up with changes made from VAG group to the API requires coders familiar with the code and structure for reverse engineering the changes into this code. Contributions in the form of raised issues and pull requests are much needed in order to maintain the functionality for all different models of Skoda cars.
+Up until now I have maintained this code after lendy007 and I have had my own interest in it since I've been using it for controlling my own Skoda. My Skoda Connect subscription is now expired and I won't be renewing it because I'm switching from my current Skoda to another car in the near future. This means that this project needs you, someone familiar with Python and an interest in keeping this code alive, in order to not stop working after the next VAG update.
+Please contact me on the Discord or through email if this person is you.
+
+/TheFarfar (Farfar)
+
 
 # Skoda Connect - A Home Assistant custom component for Skoda Connect/MyŠKODA
 
@@ -14,9 +22,21 @@ The scan_interval is how often the integration should fetch data from the server
 ### Supported setups
 
 This integration will only work for your car if you have Skoda Connect/MyŠKODA functionality. Cars using other third party, semi-official, mobile apps such as the "MinSkoda" from ConnectedCars in Denmark won't work.
+The library used for API communication is reverse engineered from the MySkoda Android app.
 Initial support has been added for SmartLink and newer style API cars, such as the Enyaq iV.
 
 The car privacy settings must be set to "Share my position" for full functionality of this integration. Without this setting, if set to "Use my position", the sensors for position (device tracker), requests remaining and parking time might not work reliably or at all. Set to even stricter privacy setting will limit functionality even further.
+
+### If you encounter problems
+If you encounter a problem where the integration can't be setup or if you receive an error that there's unaccepted terms or EULA, it might be because of your mobile app platform.
+The underlying library is built by reverse engineering the Android App behavior and thus it use the same client configurations as an Android device. If you only use the app on iPhone/iOS devices it might cause issues with this integration.
+
+Possible workarounds:
+- On iOS, log in using the old "MySkoda Essentials" app (see #198).
+- Open the MySkoda app on an Android device and it should present an EULA or new terms and conditions to be accepted.
+- Log in through a web browser (https://www.skoda-connect.com/)
+
+If this does not work for you and the particular problem you are facing, please open an issue and provide as detailed problem description as possible and relevant debug logs.
 
 ### What is working, all cars
 
@@ -32,26 +52,26 @@ The car privacy settings must be set to "Share my position" for full functionali
 - Charger maximum current
   (1-16 tested OK for Superb iV, Enyaq limited to "Maximum"/"Reduced")
 - Set departure timers (switch on/off and service call to set parameters)
+- Odometer and service info
+- Lock, windows, trunk, hood, sunroof and door status
+- Position - gps coordinates, if vehicle is moving, time parked
+- Device tracker - entity is set to 'not_home' when car is moving
 
 ### Additional information/functions VW-Group API ("All" Skodas except Enyaq iV so far)
 
-- Odometer and service info
 - Fuel level, range, adblue level
-- Lock, windows, trunk, hood, sunroof and door status
 - Last trip info
-- Position - gps coordinates, if vehicle is moving, time parked
 - start/stop auxiliary climatisation for PHEV cars
 - Lock and unlock car
 - Parking heater heating/ventilation (for non-electric cars)
 - Requests information - latest status, requests remaining until throttled
-- Device tracker - entity is set to 'not_home' when car is moving
 - Trigger data refresh - this will trigger a wake up call so the car sends new data
 
 ### Additional information/functions Skoda native API (Enyaq iV so far)
 
 - Charging power (Watts)
 - Charging rate (km per hour)
-- Charging time left (hours:minute)
+- Charging time left (minutes)
 - Seat heating (???)
 
 ### Under development and BETA functionality (may be buggy)
@@ -113,7 +133,7 @@ Setup multiple vehicles by adding the integration multiple times.
 The integration options can be changed after setup by clicking on the "CONFIGURE" text on the integration.
 The options available are:
 
-- **Poll frequency** The interval (in minutes) that the servers are polled for updated data.
+- **Poll frequency** The interval (in seconds) that the servers are polled for updated data. Several users have reported being rate limited (HTTP 429) when using 60s or lower. It is recommended to start with a value of 120s or 180s. See [#215](https://github.com/skodaconnect/homeassistant-skodaconnect/issues/215).
 
 - **S-PIN** The S-PIN for the vehicle. This is optional and is only needed for certain vehicle requests/actions (auxiliary heater, lock etc).
 
@@ -148,20 +168,22 @@ input_number:
     unit_of_measurement: min
 ```
 
-Create the automation, in yaml or via GUI editor.
+Create the automation, in yaml or via GUI editor. You can find the device id by going to Settings->Devices & Services and then clicking on the device for the Skodaconnect vehicle. The device ID will show in the web browser address bar after "/config/devices/device/". The ID can also be found by using the GUI services editor under developer tools. Choose one of the skodaconnect services and choose your vehicle. Change to YAML mode and copy the device ID.
 
 ```yaml
 # automations.yaml
-- alias: Set pre-heater duration
+- alias: Pre-heater duration
+  description: ""
   trigger:
-  - platform: state
-    entity_id: input_number.pheater_duration
+    - platform: state
+      entity_id: input_number.pheater_duration
+  condition: []
   action:
-  - service: skodaconnect.set_pheater_duration
-    data_template:
-     vin: <VIN-number of car>
-     duration: >
-        {{ trigger.to_state.state }}
+    - service: skodaconnect.set_pheater_duration
+      data_template:
+        device_id: <Your Device ID for vehicle>
+        duration: "{{ (states('input_number.pheater_duration') | float ) | round(0) }}"
+  mode: single
 ```
 
 ### Charge rate guesstimate

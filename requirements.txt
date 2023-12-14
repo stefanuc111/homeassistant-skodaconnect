@@ -1,2 +1,7 @@
+<<<<<<< HEAD
 skodaconnect>=1.3.8
 homeassistant>=2021.12.0
+=======
+skodaconnect>=1.3.9
+homeassistant>=2023.3.0
+>>>>>>> upstream/main

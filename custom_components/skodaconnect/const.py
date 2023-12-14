@@ -12,6 +12,8 @@ CONF_CONVERT = "convert"
 CONF_VEHICLE = "vehicle"
 CONF_INSTRUMENTS = "instruments"
 CONF_DEBUG = "debug"
+CONF_SAVESESSION = "store_tokens"
+CONF_TOKENS = "tokens"
 
 # Service definitions
 SERVICE_SET_SCHEDULE = "set_departure_schedule"
@@ -23,11 +25,12 @@ SERVICE_SET_PHEATER_DURATION = "set_pheater_duration"
 UPDATE_CALLBACK = "update_callback"
 DATA = "data"
 UNDO_UPDATE_LISTENER = "undo_update_listener"
+REMOVE_LISTENER = "remove_listener"
 
 SIGNAL_STATE_UPDATED = f"{DOMAIN}.updated"
 
-MIN_SCAN_INTERVAL = 10
-DEFAULT_SCAN_INTERVAL = 60
+MIN_SCAN_INTERVAL = 30
+DEFAULT_SCAN_INTERVAL = 120
 
 CONVERT_DICT = {
     CONF_NO_CONVERSION: "No conversion",

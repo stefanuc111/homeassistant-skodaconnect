@@ -16,6 +16,7 @@
         "data": {
           "vehicle": "VIN Nummer",
           "spin": "S-PIN",
+          "store_tokens": "Sla sessie bestanden op in configuratie. Zorgt voor lagere opstart tijd.",
           "mutable": "Interactie met de auto toelaten. Uitvinken maakt de auto 'alleen lezen'."
         }
       },
@@ -60,6 +61,7 @@
           "scan_interval": "Poll interval (seconden)",
           "spin": "S-PIN",
           "mutable": "Interactie met de auto toelaten. Uitvinken maakt de auto 'alleen lezen'.",
+          "store_tokens": "Sla sessie bestanden op in configuratie. Zorgt voor lagere opstart tijd.",
           "convert": "Kies afstand/eenheid conversies.",
           "resources": "Bronnen om te volgen.",
           "debug": "Volledige API debug logging (debug logging moet aan staan in configuration.yaml)"

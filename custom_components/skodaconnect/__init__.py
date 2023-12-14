@@ -2,7 +2,7 @@
 """
 Skoda Connect integration
 
-Read more at https://github.com/lendy007/homeassistant-skodaconnect/
+Read more at https://github.com/skodaconnect/homeassistant-skodaconnect/
 """
 import re
 import asyncio
@@ -17,7 +17,8 @@ from homeassistant.const import (
     CONF_PASSWORD,
     CONF_RESOURCES,
     CONF_SCAN_INTERVAL,
-    CONF_USERNAME, EVENT_HOMEASSISTANT_STOP,
+    CONF_USERNAME,
+    EVENT_HOMEASSISTANT_STOP,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
@@ -35,6 +36,7 @@ from skodaconnect.exceptions import (
     SkodaAuthenticationException,
     SkodaAccountLockedException,
     SkodaTokenExpiredException,
+    SkodaTokenInvalidException,
     SkodaException,
     SkodaEULAException,
     SkodaThrottledException,
@@ -49,15 +51,23 @@ from .const import (
     CONF_SCANDINAVIAN_MILES,
     CONF_SPIN,
     CONF_VEHICLE,
+    CONF_TOKENS,
     CONF_INSTRUMENTS,
+    CONF_DEBUG,
+    CONF_CONVERT,
+    CONF_NO_CONVERSION,
+    CONF_IMPERIAL_UNITS,
+    CONF_SAVESESSION,
     DATA,
     DATA_KEY,
     MIN_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_DEBUG,
     DOMAIN,
     SIGNAL_STATE_UPDATED,
-    UNDO_UPDATE_LISTENER, UPDATE_CALLBACK, CONF_DEBUG, DEFAULT_DEBUG, CONF_CONVERT, CONF_NO_CONVERSION,
-    CONF_IMPERIAL_UNITS,
+    UNDO_UPDATE_LISTENER,
+    REMOVE_LISTENER,
+    UPDATE_CALLBACK,
     SERVICE_SET_SCHEDULE,
     SERVICE_SET_MAX_CURRENT,
     SERVICE_SET_CHARGE_LIMIT,
@@ -74,7 +84,7 @@ SERVICE_SET_SCHEDULE_SCHEMA = vol.Schema(
         vol.Required("recurring"): cv.boolean,
         vol.Optional("date"): cv.string,
         vol.Optional("days"): cv.string,
-        vol.Optional("temp"): vol.All(vol.Coerce(int), vol.Range(min=16, max=30)),
+        vol.Optional("temp"): vol.All(vol.Coerce(float), vol.Range(min=16, max=30)),
         vol.Optional("climatisation"): cv.boolean,
         vol.Optional("charging"): cv.boolean,
         vol.Optional("charge_current"): vol.Any(
@@ -82,6 +92,8 @@ SERVICE_SET_SCHEDULE_SCHEMA = vol.Schema(
             vol.In(['Maximum', 'maximum', 'Max', 'max', 'Minimum', 'minimum', 'Min', 'min', 'Reduced', 'reduced'])
         ),
         vol.Optional("charge_target"): vol.In([0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]),
+        vol.Optional("heater_source"): cv.boolean,
+        vol.Optional("spin"): vol.All(cv.string, vol.Match(r"^[0-9]{4}$")),
         vol.Optional("off_peak_active"): cv.boolean,
         vol.Optional("off_peak_start"): cv.string,
         vol.Optional("off_peak_end"): cv.string,
@@ -106,7 +118,7 @@ SERVICE_SET_CLIMATER_SCHEMA = vol.Schema(
     {
         vol.Required("device_id"): vol.All(cv.string, vol.Length(min=32, max=32)),
         vol.Required("enabled", default=True): cv.boolean,
-        vol.Optional("temp"): vol.All(vol.Coerce(int), vol.Range(min=16, max=30)),
+        vol.Optional("temp"): vol.All(vol.Coerce(float), vol.Range(min=16, max=30)),
         vol.Optional("battery_power"): cv.boolean,
         vol.Optional("aux_heater"): cv.boolean,
         vol.Optional("spin"): vol.All(cv.string, vol.Match(r"^[0-9]{4}$"))
@@ -151,10 +163,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     except Exception as e:
         raise ConfigEntryNotReady(e) from e
 
-    entry.async_on_unload(
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, coordinator.async_logout)
-    )
-
+    # Do a first update of all vehicles
     await coordinator.async_refresh()
     if not coordinator.last_update_success:
         raise ConfigEntryNotReady
@@ -243,6 +252,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         UPDATE_CALLBACK: update_callback,
         DATA: data,
         UNDO_UPDATE_LISTENER: entry.add_update_listener(_async_update_listener),
+        REMOVE_LISTENER: hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STOP, coordinator.async_logout
+        ),
     }
 
     # Service functions
@@ -278,6 +290,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             # Prepare data
             id = service_call.data.get("id", 0)
             temp = None
+            spin = service_call.data.get("spin", None)
+
 
             # Convert datetime objects to simple strings or check that strings are correctly formatted
             try:
@@ -314,9 +328,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 "days": service_call.data.get("days", "nnnnnnn"),
             }
             # Set optional values
+            # Heater source
+            if service_call.data.get("heater_source", None) is not None:
+                if service_call.data.get("heater_source", False) is True:
+                    if spin is None:
+                        raise SkodaInvalidRequestException("S-PIN is required when using auxiliary heater.")
+                    schedule["heaterSource"] = "automatic"
+                else:
+                    schedule["heaterSource"] = "electric"
             # Night rate
-            if service_call.data.get("climatisation", None) is not None:
-                schedule["nightRateActive"] = service_call.data.get("climatisation")
+            if service_call.data.get("off_peak_active", None) is not None:
+                schedule["nightRateActive"] = service_call.data.get("off_peak_active")
             if service_call.data.get("off_peak_start", None) is not None:
                 schedule["nightRateTimeStart"] = service_call.data.get("off_peak_start")
             if service_call.data.get("off_peak_end", None) is not None:
@@ -337,13 +359,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             # Find the correct car and execute service call
             car = await get_car(service_call)
             _LOGGER.info(f'Set departure schedule {id} with data {schedule} for car {car.vin}')
-            if await car.set_timer_schedule(id, schedule) is True:
+            state = await car.set_timer_schedule(id, schedule, spin)
+            if state is not False:
                 _LOGGER.debug(f"Service call 'set_schedule' executed without error")
                 await coordinator.async_request_refresh()
             else:
                 _LOGGER.warning(f"Failed to execute service call 'set_schedule' with data '{service_call}'")
         except (SkodaInvalidRequestException) as e:
-            _LOGGER.warning(f"Service call 'set_schedule' failed {e}")
+            _LOGGER.warning(f"Service call 'set_schedule' failed. {e}")
         except Exception as e:
             raise
 
@@ -354,13 +377,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
             # Get charge limit and execute service call
             limit = service_call.data.get("limit", 50)
-            if await car.set_charge_limit(limit) is True:
+            state = await car.set_charge_limit(limit)
+            if state is not False:
                 _LOGGER.debug(f"Service call 'set_charge_limit' executed without error")
                 await coordinator.async_request_refresh()
             else:
                 _LOGGER.warning(f"Failed to execute service call 'set_charge_limit' with data '{service_call}'")
         except (SkodaInvalidRequestException) as e:
-            _LOGGER.warning(f"Service call 'set_schedule' failed {e}")
+            _LOGGER.warning(f"Service call 'set_charge_limit' failed {e}")
         except Exception as e:
             raise
 
@@ -371,13 +395,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
             # Get charge current and execute service call
             current = service_call.data.get('current', None)
-            if await car.set_charger_current(current) is True:
+            state = await car.set_charger_current(current)
+            if state is not False:
                 _LOGGER.debug(f"Service call 'set_current' executed without error")
                 await coordinator.async_request_refresh()
             else:
                 _LOGGER.warning(f"Failed to execute service call 'set_current' with data '{service_call}'")
         except (SkodaInvalidRequestException) as e:
-            _LOGGER.warning(f"Service call 'set_schedule' failed {e}")
+            _LOGGER.warning(f"Service call 'set_current' failed {e}")
         except Exception as e:
             raise
 
@@ -389,7 +414,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             _LOGGER.debug(f"Service call 'set_pheater_duration' executed without error")
             await coordinator.async_request_refresh()
         except (SkodaInvalidRequestException) as e:
-            _LOGGER.warning(f"Service call 'set_schedule' failed {e}")
+            _LOGGER.warning(f"Service call 'set_pheater_duration' failed {e}")
         except Exception as e:
             raise
 
@@ -408,12 +433,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 temp = hvpower = spin = None
             # Execute service call
             if await car.set_climatisation(action, temp, hvpower, spin) is True:
-                _LOGGER.debug(f"Service call 'set_climater' executed without error")
+                _LOGGER.debug("Service call 'set_climater' executed without error")
                 await coordinator.async_request_refresh()
             else:
-                _LOGGER.warning(f"Failed to execute service call 'set_current' with data '{service_call}'")
+                _LOGGER.warning(f"Failed to execute service call 'set_climater' with data '{service_call}'")
         except (SkodaInvalidRequestException) as e:
-            _LOGGER.warning(f"Service call 'set_schedule' failed {e}")
+            _LOGGER.warning(f"Service call 'set_climater' failed {e}")
         except Exception as e:
             raise
 
@@ -448,16 +473,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         set_pheater_duration,
         schema = SERVICE_SET_PHEATER_DURATION_SCHEMA
     )
-
     return True
-
 
 def update_callback(hass, coordinator):
     _LOGGER.debug("CALLBACK!")
     hass.async_create_task(
         coordinator.async_request_refresh()
     )
-
 
 async def async_setup(hass: HomeAssistant, config: dict):
     """Set up the component from configuration.yaml."""
@@ -478,7 +500,6 @@ async def async_setup(hass: HomeAssistant, config: dict):
 
     return True
 
-
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Unload a config entry."""
     _LOGGER.debug("Unloading services")
@@ -487,20 +508,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     hass.services.async_remove(DOMAIN, SERVICE_SET_CHARGE_LIMIT)
     hass.services.async_remove(DOMAIN, SERVICE_SET_CLIMATER)
     hass.services.async_remove(DOMAIN, SERVICE_SET_PHEATER_DURATION)
-
-    _LOGGER.debug("Unloading update listener")
-    hass.data[DOMAIN][entry.entry_id][UNDO_UPDATE_LISTENER]()
-
     return await async_unload_coordinator(hass, entry)
-
 
 async def async_unload_coordinator(hass: HomeAssistant, entry: ConfigEntry):
     """Unload auth token based entry."""
+    _LOGGER.debug("Unloading update listener")
+    hass.data[DOMAIN][entry.entry_id][UNDO_UPDATE_LISTENER]()
+    hass.data[DOMAIN][entry.entry_id].pop(UNDO_UPDATE_LISTENER, None)
+
     _LOGGER.debug("Unloading coordinator")
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA].coordinator
-
-    _LOGGER.debug("Log out from Skoda Connect")
     await coordinator.async_logout()
+    _LOGGER.debug("Waiting for shutdown to complete")
     unloaded = all(
         await asyncio.gather(
             *[
@@ -520,11 +539,10 @@ async def async_unload_coordinator(hass: HomeAssistant, entry: ConfigEntry):
 
     return unloaded
 
-
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry):
     """Handle options update."""
+    # Do a lazy reload of integration when configuration changed
     await hass.config_entries.async_reload(entry.entry_id)
-
 
 def get_convert_conf(entry: ConfigEntry):
     return CONF_SCANDINAVIAN_MILES if entry.options.get(
@@ -542,21 +560,43 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry):
     # Migrate data from version 1, pre 1.0.57
     if entry.version == 1:
         # Make a copy of old config
-        new = {**entry.data}
+        new_data = {**entry.data}
+        new_options = {**entry.options}
 
         # Convert from minutes to seconds for poll interval
         minutes = entry.options.get("update_interval", 1)
         seconds = minutes*60
-        new.pop("update_interval", None)
-        new[CONF_SCAN_INTERVAL] = seconds
+        new_data.pop("update_interval", None)
+        new_data[CONF_SCAN_INTERVAL] = seconds
+        # Default "save session" to false
+        new_options[CONF_SAVESESSION] = False
 
         # Save "new" config
-        entry.data = {**new}
+        entry.data = {**new_data}
+        entry.options = {**new_options}
+        entry.version = 3
+        hass.config_entries.async_update_entry(entry, data=new_data, options=new_options)
 
-        entry.version = 2
+    # Migrate data from version 2, pre version 1.2
+    if entry.version == 2:
+        # Make a copy of old config
+        new_data = {**entry.data}
+        new_options = {**entry.options}
+
+        # Default "save session" to false
+        new_options[CONF_SAVESESSION] = False
+        new_data[CONF_TOKENS] = {}
+
+        # Save "new" config
+        #entry.options = {**new_options}
+        #entry.data = {**new_data}
+        entry.version = 3
+        hass.config_entries.async_update_entry(entry, data=new_data, options=new_options)
 
     _LOGGER.info("Migration to version %s successful", entry.version)
     return True
+
+
 class SkodaData:
     """Hold component state."""
 
@@ -661,6 +701,11 @@ class SkodaEntity(Entity):
             return icon_for_battery_level(
                 battery_level=self.instrument.state, charging=self.vehicle.charging
             )
+        if self.instrument.attr in ["plug_autounlock"]:
+            if self.instrument.state == True:
+                return "mdi:battery-lock-open"
+            else:
+                return "mdi:battery-lock"
         return self.instrument.icon
 
     @property
@@ -738,6 +783,7 @@ class SkodaCoordinator(DataUpdateCoordinator):
 
     def __init__(self, hass: HomeAssistant, entry, update_interval: timedelta):
         self.vin = entry.data[CONF_VEHICLE].upper()
+        self.hass = hass
         self.entry = entry
         self.platforms = []
         self.report_last_updated = None
@@ -781,10 +827,59 @@ class SkodaCoordinator(DataUpdateCoordinator):
         """Logout from Skoda Connect"""
         _LOGGER.debug("Shutdown Skoda Connect")
         try:
-            await self.connection.terminate()
+            entry_options = self.entry.options.copy()
+            entry_data = self.entry.data.copy()
+            # Unload update listener
+            try:
+                if UNDO_UPDATE_LISTENER in self.hass.data[DOMAIN][self.entry.entry_id]:
+                    _LOGGER.debug(f"Unloading update listener")
+                    self.hass.data[DOMAIN][self.entry.entry_id][UNDO_UPDATE_LISTENER]()
+            except Exception as e:
+                _LOGGER.debug(f"Unloading update listener")
+                # If config is only reloaded this will throw an exception
+                pass
+
+            if entry_options.get(CONF_SAVESESSION, False):
+                try:
+                    # Save session is true, save tokens for all clients
+                    tokens = await self.connection.save_tokens()
+                    if tokens is not False:
+                        _LOGGER.debug('Successfully fetched tokens to save')
+                        entry_data[CONF_TOKENS] = tokens
+                        _LOGGER.debug("Saving tokens to config registry")
+                        self.hass.config_entries.async_update_entry(
+                            self.entry,
+                            data=entry_data,
+                            options=entry_options
+                        )
+                        _LOGGER.debug("Save complete.")
+                    else:
+                        _LOGGER.debug(f'Save tokens failed.')
+                except Exception as e:
+                    raise SkodaException(f'Save tokens failed: {e}')
+            else:
+                try:
+                    # Save session is false, remove any saved tokens
+                    entry_data[CONF_TOKENS] = {}
+                    _LOGGER.debug("Removing tokens from config registry")
+                    self.hass.config_entries.async_update_entry(
+                        self.entry,
+                        data=entry_data,
+                        options=entry_options
+                    )
+                    # Revoke tokens
+                    _LOGGER.debug("Terminate connection")
+                    await self.connection.terminate()
+                except Exception as e:
+                    raise SkodaException(f'Revocation of tokens failed: {e}')
+            # Clear connection session
+            _LOGGER.debug('Unloading library connection')
             self.connection = None
+        except (SkodaException) as e:
+            _LOGGER.error(e)
+            return False
         except Exception as ex:
-            _LOGGER.error("Failed to log out and revoke tokens for Skoda Connect. Some tokens might still be valid.")
+            _LOGGER.error('Errors occured during shutdown.')
             return False
         return True
 
@@ -792,11 +887,17 @@ class SkodaCoordinator(DataUpdateCoordinator):
         """Login to Skoda Connect"""
         # Check if we can login
         try:
-            if await self.connection.doLogin() is False:
-                _LOGGER.warning(
-                    "Could not login to Skoda Connect, please check your credentials and verify that the service is working"
-                )
-                return False
+            restore = False
+            if self.entry.options.get(CONF_SAVESESSION, False):
+                if len(self.entry.data.get(CONF_TOKENS, {})) != 0:
+                    if await self.connection.restore_tokens(self.entry.data.get(CONF_TOKENS, None)):
+                        restore = True
+            if restore is False:
+                if await self.connection.doLogin() is False:
+                    _LOGGER.warning(
+                        "Could not login to Skoda Connect, please check your credentials and verify that the service is working"
+                    )
+                    return False
             # Get associated vehicles before we continue
             await self.connection.get_vehicles()
             return True

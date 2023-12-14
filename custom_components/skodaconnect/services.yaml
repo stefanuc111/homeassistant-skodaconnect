@@ -1,5 +1,5 @@
 # Describes the format for available Skoda Connect service calls
-
+---
 set_charge_limit:
   name: Set charge limit
   description: >
@@ -144,7 +144,7 @@ set_departure_schedule:
           mode: slider
     time:
       name: Time
-      description: "[Required] The time for departure, 24h HH:MM."
+      description: "[Required] The time, in UTC, for departure, 24h HH:MM."
       required: true
       example: "17:00"
       selector:
@@ -218,6 +218,21 @@ set_departure_schedule:
           max: 100
           step: 10
           unit_of_measurement: percent
+    heater_source:
+      name: Allow Auxiliary Heater
+      description: "[Optional] Enable allow use of aux heater for next departure"
+      advanced: true
+      example: true
+      selector:
+        boolean:
+    spin:
+      name: S-PIN
+      description: >
+        [Optional] Security PIN, required if enabling Auxiliary heater.
+      advanced: true
+      example: 1234
+      selector:
+        text:
     off_peak_active:
       name: Off-peak active
       description: "[Optional] Enable off-peak hours"
@@ -227,14 +242,14 @@ set_departure_schedule:
         boolean:
     off_peak_start:
       name: Off-peak Start
-      description: "[Optional] The time when off-peak hours for electric price start, 24h HH:MM."
+      description: "[Optional] The time, in UTC, when off-peak hours for electric price start, 24h HH:MM."
       advanced: true
       example: "00:00"
       selector:
         text:
     off_peak_end:
       name: Off-peak End
-      description: "[Optional] The time when off-peak hours for electric price end, 24h HH:MM."
+      description: "[Optional] The time, in UTC, when off-peak hours for electric price end, 24h HH:MM."
       advanced: true
       example: "06:00"
       selector:
